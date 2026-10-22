@@ -78,9 +78,11 @@ const TL = {
     if (!this.q.length) return;
     const body = JSON.stringify({ events: this.q.splice(0, 60) });
     try {
-      if (navigator.sendBeacon) navigator.sendBeacon(this.endpoint, new Blob([body], { type: 'application/json' }));
-      else fetch(this.endpoint, { method: 'POST', body: body, mode: 'no-cors', headers: { 'Content-Type': 'application/json' } }).catch(function () {});
-    } catch (e) {}
+      fetch(this.endpoint, { method: 'POST', keepalive: true, headers: { 'Content-Type': 'text/plain' }, body: body })
+        .catch(() => { try { navigator.sendBeacon(this.endpoint, body); } catch (e2) {} });
+    } catch (e) {
+      try { navigator.sendBeacon(this.endpoint, body); } catch (e2) {}
+    }
   }
 };
 window.addEventListener('pagehide', () => TL.flush());
