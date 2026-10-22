@@ -61,6 +61,30 @@ function titleFor(points) {
   return t;
 }
 
+/* ---------- телеметрия (статистика для родителей) ---------- */
+const TL = {
+  endpoint: 'https://game-metrics.kirillovd.workers.dev/track',
+  q: [], timer: null, logged: false, curCase: null,
+  send: function (t, d) {
+    try {
+      const p = P();
+      this.q.push({ t: t, g: 'math', p: p ? p.name : '—', d: String(d || '').slice(0, 150), ts: Date.now() });
+      if (this.q.length >= 10) this.flush();
+      else if (!this.timer) this.timer = setTimeout(() => this.flush(), 7000);
+    } catch (e) { /* тише едешь — статистика целее */ }
+  },
+  flush: function () {
+    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+    if (!this.q.length) return;
+    const body = JSON.stringify({ events: this.q.splice(0, 60) });
+    try {
+      if (navigator.sendBeacon) navigator.sendBeacon(this.endpoint, new Blob([body], { type: 'application/json' }));
+      else fetch(this.endpoint, { method: 'POST', body: body, mode: 'no-cors', headers: { 'Content-Type': 'application/json' } }).catch(function () {});
+    } catch (e) {}
+  }
+};
+window.addEventListener('pagehide', () => TL.flush());
+
 /* ---------- прогресс по задачам ---------- */
 function entryKey(cid, pid) { return cid + '/' + pid; }
 function getEntry(cid, pid) { const p = P(); return p ? p.problems[entryKey(cid, pid)] || null : null; }
@@ -184,6 +208,8 @@ function route() {
   const p = P();
   if (!p) { renderProfiles(); return; }
   touchActivity();
+  if (!h.startsWith('case/')) TL.curCase = null;
+  if (!TL.logged) { TL.logged = true; TL.send('login', 'монет: ' + p.points + ', дел закрыто: ' + Object.keys(p.bosses).length); }
   if (!p.briefed && h !== 'admin' && h !== 'brief') { renderBrief(); return; }
   if (h === 'brief') { renderBrief(); return; }
   if (h === '' || h === 'map') renderMap();
@@ -367,6 +393,7 @@ function renderCase(cid) {
   if (!caseUnlocked(cIdx)) { location.hash = 'map'; return; }
   const p = P();
   const st = caseStats(c);
+  if (TL.curCase !== cid) { TL.curCase = cid; TL.send('case_open', cid + ' закрыто ' + st.closed + '/' + st.total); }
   const bossNeed = Math.max(1, c.problems.length - 3);
   const bossLocked = st.closed < bossNeed;
 
@@ -498,6 +525,7 @@ function hintPressed(cid, pid, level) {
   if (e.hints >= level) return;
   e.hints = level;
   setEntry(cid, pid, e);
+  TL.send('hint', cid + '/' + pid + ' уровень ' + level);
   renderCase(cid);
 }
 function solutionPressed(cid, pid) {
@@ -515,6 +543,7 @@ function confirmSolution(cid, pid) {
   e.got = 0;
   setEntry(cid, pid, e);
   closeModal();
+  TL.send('solution', cid + '/' + pid);
   renderCase(cid);
 }
 function checkAnswer(cid, pid) {
@@ -532,8 +561,10 @@ function checkAnswer(cid, pid) {
     setEntry(cid, pid, e);
     addPoints(got);
     afterProblemSolved(cid, pid, e.hints, false);
+    TL.send('answer', cid + '/' + pid + ' ✔ подсказок: ' + (e.hints || 0));
     renderCase(cid);
   } else {
+    TL.send('answer', cid + '/' + pid + ' ✘');
     box.innerHTML = '<span class="result-bad">Пока не сходится. Попробуй ещё раз — ошибаться здесь не стыдно!</span>';
     $('ans-' + pid).select();
   }
@@ -558,6 +589,7 @@ function selfSolved(cid, pid, force) {
   setEntry(cid, pid, e);
   addPoints(got);
   afterProblemSolved(cid, pid, e.hints, false);
+  TL.send('selfsolved', cid + '/' + pid);
   closeModal();
   toast('Честное слово детектива принято!');
   renderCase(cid);
@@ -599,6 +631,7 @@ function bossWin(cid, reviewed, force) {
   }
   saveStore();
   unlockAch('a_boss');
+  TL.send('boss', cid + ' ' + (reviewed ? '(разбор)' : '(победа)'));
   addPoints(got, true);
   const letter = DATA.mystery.word[c.boss.letter];
   confetti();
@@ -692,6 +725,7 @@ function examSubmit() {
   if (p.exam.best === null || score > p.exam.best) p.exam.best = score;
   if (score >= 5 && p.letters.indexOf(2) < 0) p.letters.push(2);
   saveStore();
+  TL.send('exam', score + ' из 8 верных');
   addPoints(score * DATA.exam.pointsPerTask, true);
   if (score >= 5) unlockAch('a_exam');
   renderExamResults();
@@ -768,6 +802,7 @@ function mysteryTry() {
     p.mysterySolved = true;
     saveStore();
     unlockAch('a_mystery');
+    TL.send('mystery', 'тайное слово угадано');
     confetti();
     renderMystery();
     showModal(`<h2>Тайна агентства раскрыта! 🗝️</h2><div class="big">✨🕵️✨</div>
