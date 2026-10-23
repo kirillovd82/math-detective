@@ -24,7 +24,7 @@ let examTimer = null;
 /* ---------- утилиты ---------- */
 function $(id) { return document.getElementById(id); }
 function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
-function today() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function today(off) { const d = new Date(); if (off) d.setDate(d.getDate() + off); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
 function norm(v) {
   return String(v).toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ').trim();
 }
@@ -102,6 +102,65 @@ const TL = {
   }
 };
 window.addEventListener('pagehide', () => TL.flush());
+
+/* ---------- похвала, локальная история, письма Шефа ---------- */
+const PRAISE = ['Ты гений! 🔥', 'Блестяще!', 'Гениально!', 'Великолепно!', 'Такое решают единицы!', 'Шеф снял шляпу!', 'Это талант детектива!', 'Виртуозно!'];
+const PRAISE_GRIT = ['Вот это упорство! 💪', 'Настоящий детектив не сдаётся!', 'Ошибка — ступенька. Ты выше!', 'Упорство дороже скорости!'];
+function praiseToast(extra) { toast(PRAISE[Math.floor(Math.random() * PRAISE.length)] + (extra ? ' ' + extra : '')); }
+function hist(k, x) {
+  const p = P();
+  p.history = p.history || [];
+  p.history.push({ d: today(), k: k, x: String(x || '').slice(0, 90) });
+  if (p.history.length > 400) p.history.splice(0, p.history.length - 400);
+  saveStore();
+}
+function noteAttempts(cid, pid) {
+  const p = P();
+  p.attempts = p.attempts || {};
+  const k = entryKey(cid, pid);
+  p.attempts[k] = (p.attempts[k] || 0) + 1;
+  return p.attempts[k];
+}
+function pushRecent(h) {
+  const p = P();
+  p.recent = (p.recent || []).slice(-5);
+  p.recent.push(h);
+  saveStore();
+}
+function adaptiveNudge() {
+  const p = P();
+  const r = p.recent || [];
+  if (r.length < 3) return;
+  const last3 = r.slice(-3);
+  if (last3.every(h => h === 0)) toast('🔥 Ты на кураже — главарь дела дрожит! Держи темп!', 'ach');
+  else if (last3.every(h => h >= 2)) toast('💡 Совет Шефа: следующую попробуй максимум с одной наводкой — ты сможешь!');
+}
+function buildLetter(cid) {
+  const c = DATA.caseList.find(x => x.id === cid);
+  const p = P();
+  let solvedN = 0, clean = 0, hintsSum = 0, attSum = 0;
+  c.problems.forEach(pr => {
+    const e = p.problems[entryKey(cid, pr.id)];
+    if (!e || e.status !== 'solved') return;
+    solvedN++;
+    if (e.hints === 0 && !e.solution) clean++;
+    hintsSum += e.hints || 0;
+    attSum += (p.attempts || {})[entryKey(cid, pr.id)] || 0;
+  });
+  let strong;
+  if (clean >= 8) strong = 'ты закрыл(а) ' + clean + ' улик без единой подсказки — это уровень мастера. Такое я видел(а) только у лучших агентства.';
+  else if (clean >= 5) strong = 'больше половины улик — чистой работой, без подсказок. Твой ум работает как надо.';
+  else strong = 'ты дошёл(ла) до главаря и победил(а) его. Упорство дороже скорости — и оно у тебя есть.';
+  const avgH = solvedN ? hintsSum / solvedN : 0;
+  const avgA = solvedN ? attSum / solvedN : 0;
+  let advice;
+  if (avgH >= 1.5) advice = 'Один совет: когда рука тянется ко второй наводке — выдержи ещё одну минуту тишины. Твои «чистые» решения у тебя получаются, я видел(а).';
+  else if (avgA >= 2) advice = 'Один совет: перед третьей попыткой перечитай условие вслух — половина ответов прячется в формулировке.';
+  else advice = 'Тебе пора на «десерты» и главарей потруднее — обычным задачам ты тесно.';
+  return '<p>Агент <b>' + esc(p.name) + '</b>, дело №' + c.num + ' «' + esc(c.title) + '» закрыто — и вот что я скажу.</p>' +
+    '<p>' + strong + '</p><p>' + advice + '</p>' +
+    '<div style="text-align:right;font-style:italic;margin-top:8px">Служу логике.<br>Твой Шеф 🎩</div>';
+}
 
 /* ---------- прогресс по задачам ---------- */
 function entryKey(cid, pid) { return cid + '/' + pid; }
@@ -211,7 +270,8 @@ function dayCheck() {
   }
   const got = daySession.hints ? 8 : 15;
   flameOnSolve();
-  addPoints(got);
+  addPoints(got, true);
+  hist('day', 'задача дня ✔ +' + got + ' (серия ' + P().flame.streak + ')');
   TL.send('daytask', '✔ +' + got + ' 🪙 серия=' + P().flame.streak);
   confetti();
   showModal(`
@@ -640,6 +700,7 @@ function renderCase(cid) {
     <p class="note">Подсказки не портят репутацию: подсмотрел идею и добил — тоже победа (просто чуть меньше монет). Неверный ответ ничем не наказывается — пробуй ещё!</p></div>
     ${problems}
     ${bossHtml}
+    ${bossDone && p.sheinLetters && p.sheinLetters[cid] ? `<div class="paper" style="border:2px solid var(--gold)"><h4>📩 Письмо от Шефа</h4>${p.sheinLetters[cid]}</div>` : ''}
     ${bossDone ? `<div class="paper" style="text-align:center"><h4>ШТАМП: ДЕЛО №${c.num} ЗАКРЫТО</h4><p>Буква тайного слова получена — загляни на страницу <a href="#mystery">Тайны</a>.</p></div>` : ''}
     ${footerHtml()}`;
 }
@@ -686,12 +747,18 @@ function checkAnswer(cid, pid) {
     e.status = 'solved';
     e.got = Math.max(e.got || 0, got);
     setEntry(cid, pid, e);
-    addPoints(got);
+    addPoints(got, true);
     afterProblemSolved(cid, pid, e.hints, false);
+    praiseToast('+' + got + ' 🪙');
+    hist('solve', cid + '/' + pid + (e.hints === 0 && !e.solution ? ' чисто' : ' подсказки: ' + (e.hints || 0)));
     TL.send('answer', cid + '/' + pid + ' ✔ подсказок: ' + (e.hints || 0));
+    pushRecent(e.hints || 0);
+    adaptiveNudge();
     renderCase(cid);
   } else {
+    const att = noteAttempts(cid, pid);
     TL.send('answer', cid + '/' + pid + ' ✘');
+    if (att >= 2) toast(PRAISE_GRIT[Math.floor(Math.random() * PRAISE_GRIT.length)]);
     box.innerHTML = '<span class="result-bad">Пока не сходится. Попробуй ещё раз — ошибаться здесь не стыдно!</span>';
     $('ans-' + pid).select();
   }
@@ -714,11 +781,12 @@ function selfSolved(cid, pid, force) {
   e.status = 'solved';
   e.got = got;
   setEntry(cid, pid, e);
-  addPoints(got);
+  addPoints(got, true);
   afterProblemSolved(cid, pid, e.hints, false);
+  praiseToast('+' + got + ' 🪙 честным словом!');
+  hist('selfsolved', cid + '/' + pid);
   TL.send('selfsolved', cid + '/' + pid);
   closeModal();
-  toast('Честное слово детектива принято!');
   renderCase(cid);
 }
 
@@ -759,6 +827,11 @@ function bossWin(cid, reviewed, force) {
   saveStore();
   unlockAch('a_boss');
   TL.send('boss', cid + ' ' + (reviewed ? '(разбор)' : '(победа)'));
+  hist('boss', 'Дело ' + cid + ' закрыто');
+  const p2 = P();
+  p2.sheinLetters = p2.sheinLetters || {};
+  p2.sheinLetters[cid] = buildLetter(cid);
+  saveStore();
   addPoints(got, true);
   const letter = DATA.mystery.word[c.boss.letter];
   confetti();
@@ -853,6 +926,7 @@ function examSubmit() {
   if (score >= 5 && p.letters.indexOf(2) < 0) p.letters.push(2);
   saveStore();
   TL.send('exam', score + ' из 8 верных');
+  hist('exam', 'экзамен: ' + score + ' из 8');
   addPoints(score * DATA.exam.pointsPerTask, true);
   if (score >= 5) unlockAch('a_exam');
   renderExamResults();
@@ -1018,6 +1092,25 @@ function saveProgress() {
 }
 
 /* ---------- родительская страница ---------- */
+function weekReportHtml() {
+  const p = P();
+  const H = p.history || [];
+  const days = [];
+  for (let i = 6; i >= 0; i--) days.push(today(-i));
+  const names = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
+  const rows = days.map(d => {
+    const evs = H.filter(h => h.d === d);
+    const wd = names[new Date(d).getDay()];
+    if (!evs.length) return '<div class="prize-row"><span class="small muted">' + wd + ' ' + d.slice(5) + ' — тишина</span></div>';
+    const solves = evs.filter(h => h.k === 'solve');
+    const clean = solves.filter(h => h.x.indexOf('чисто') >= 0).length;
+    const others = evs.filter(h => h.k !== 'solve').map(h => esc(h.x));
+    return '<div class="prize-row"><div style="flex:1;min-width:0"><b>' + wd + ' ' + d.slice(5) + '</b> <span class="small">— задач решено: ' + solves.length + ' (без подсказок: ' + clean + ')</span>' +
+      (others.length ? '<div class="small muted">' + others.join(' · ') + '</div>' : '') + '</div></div>';
+  });
+  const active = days.filter(d => H.some(h => h.d === d)).length;
+  return rows.join('') + '<p class="small muted">Дней с занятиями за неделю: ' + active + ' из 7. Серия задачи дня: ' + ((p.flame && p.flame.streak) || 0) + ' 🔥 (рекорд ' + ((p.flame && p.flame.best) || 0) + ').</p>';
+}
 function adminNotesHtml() {
   const p = P();
   if (!p) return '<p class="small">Профиль не выбран.</p>';
@@ -1089,6 +1182,10 @@ function renderAdmin() {
     <div class="admin-box">
       <h3>Записи агента</h3>
       ${adminNotesHtml()}
+    </div>
+    <div class="admin-box">
+      <h3>Отчёт за неделю</h3>
+      ${weekReportHtml()}
     </div>
     <div class="admin-box">
       <h3>Полезно знать</h3>
