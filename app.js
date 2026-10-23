@@ -97,6 +97,114 @@ function caseStats(c) {
   const closed = c.problems.filter(pr => getEntry(c.id, pr.id)).length;
   return { closed, total: c.problems.length, boss: !!(P().bosses[c.id] && P().bosses[c.id].done) };
 }
+/* ---------- задача дня и календарь огня ---------- */
+function dateStr(offset) {
+  const d = new Date();
+  d.setDate(d.getDate() + (offset || 0));
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function dayTaskFor(dstr) {
+  const n = Math.floor(Date.parse(dstr) / 86400000);
+  return DATA.dayTasks[n % DATA.dayTasks.length];
+}
+function flameOf() {
+  const p = P();
+  if (!p.flame) p.flame = { last: null, streak: 0, best: 0, days: {} };
+  return p.flame;
+}
+function flameOnSolve() {
+  const f = flameOf();
+  const d = today();
+  if (f.last === d) return;
+  f.streak = (f.last === dateStr(-1)) ? f.streak + 1 : 1;
+  f.last = d;
+  f.best = Math.max(f.best, f.streak);
+  f.days[d] = true;
+  const keys = Object.keys(f.days).sort();
+  while (keys.length > 30) delete f.days[keys.shift()];
+  saveStore();
+  if (f.streak >= 3) unlockAch('a_streak3');
+}
+function daySolvedToday() {
+  const p = P();
+  return !!(p.flame && p.flame.days && p.flame.days[today()]);
+}
+function flameStripHtml() {
+  const p = P();
+  const f = p.flame || { streak: 0, best: 0, days: {} };
+  const names = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
+  let cells = '';
+  for (let i = 6; i >= 0; i--) {
+    const d = dateStr(-i);
+    const lit = !!(f.days && f.days[d]);
+    const wd = names[(new Date(d).getDay() + 6) % 7];
+    cells += `<div class="flame-cell ${lit ? 'lit' : ''} ${i === 0 ? 'today' : ''}"><span class="f-ico">${lit ? '🔥' : '·'}</span><span class="f-day">${wd}</span></div>`;
+  }
+  return `<div class="flame-strip">${cells}</div>`;
+}
+function dayTaskCardHtml() {
+  const f = P().flame || { streak: 0, best: 0 };
+  const solved = daySolvedToday();
+  return `
+  <div class="paper day-card">
+    <h4>🔥 Задача дня</h4>
+    <div class="day-row">
+      <div class="flame-info">серия: <b>${f.streak || 0}</b> 🔥 · рекорд: <b>${f.best || 0}</b></div>
+      ${flameStripHtml()}
+      ${solved
+        ? '<span class="result-ok">✔ решено сегодня — возвращайся завтра!</span>'
+        : '<button class="gold" data-act="dayOpen">Решить задачу дня 🔥</button>'}
+    </div>
+  </div>`;
+}
+let daySession = { hints: 0 };
+function dayOpen() {
+  daySession = { hints: 0 };
+  const t = dayTaskFor(today());
+  showModal(`
+    <h2>🔥 Задача дня</h2>
+    <p>${t.q}</p>
+    <div class="answer-row" style="justify-content:center">
+      <input type="text" id="day-ans" placeholder="${t.answerNote || 'ответ'}" autocomplete="off">
+      <button class="gold" data-act="dayCheck">Проверить</button>
+    </div>
+    <div id="day-hints"></div>
+    <div id="day-res"></div>
+    <div style="margin-top:8px">
+      <button class="small-btn ghost" data-act="dayHint" data-arg="1">💡 Наводка</button>
+      <button class="small-btn ghost" data-act="dayHint" data-arg="2">💡 Ещё наводка</button>
+    </div>
+    <p class="small" style="color:var(--ink-soft);margin-top:6px">Награда: ${daySession.hints ? '' : ''}15 🪙 без подсказок · 8 🪙 с наводками</p>
+  `);
+  $('day-ans').focus();
+}
+function dayHint(level) {
+  if (level <= daySession.hints) return;
+  const t = dayTaskFor(today());
+  daySession.hints = level;
+  $('day-hints').innerHTML += `<div class="hint-item" style="text-align:left">${level === 1 ? t.hint1 : (t.hint2 || t.hint1)}</div>`;
+}
+function dayCheck() {
+  const t = dayTaskFor(today());
+  const val = $('day-ans').value;
+  const ok = t.answers.some(a => normHard(a) === normHard(val)) || t.answers.some(a => norm(a) === norm(val));
+  if (!ok) {
+    TL.send('daytask', '✘ ' + (daySession.hints ? '(с наводкой)' : ''));
+    $('day-res').innerHTML = '<span class="result-bad">Пока не сходится — попробуй ещё!</span>';
+    return;
+  }
+  const got = daySession.hints ? 8 : 15;
+  flameOnSolve();
+  addPoints(got);
+  TL.send('daytask', '✔ +' + got + ' 🪙 серия=' + P().flame.streak);
+  confetti();
+  showModal(`
+    <h2>🔥 Верно!</h2>
+    <div class="big">🔥</div>
+    <p>+${got} 🪙 в казну${P().flame.streak > 1 ? ' · серия: ' + P().flame.streak + ' дней 🔥' : ''}</p>
+    <div class="hist-note" style="text-align:left">${t.explain}</div>
+    <button class="gold" data-act="dayDone">Отлично!</button>`);
+}
 function caseUnlocked(idx) {
   if (idx === 0) return true;
   const prev = DATA.caseList[idx - 1];
@@ -377,6 +485,7 @@ function renderMap() {
     return `<div class="safe-box ${opened ? 'open' : ''}" title="${thr} 🪙" ${opened ? `data-act="showSafe" data-arg="${i}"` : ''}>${opened ? '🎁' : '🔒'}</div>`;
   }).join('');
   $('app').innerHTML = headerHtml('map') + `
+    ${dayTaskCardHtml()}
     <p class="board-intro">Стена расследований. Иди по красной нити: теория → разборы → задачи → главарь. Сейфы открываются сами, когда набираются монеты 🪙.</p>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;">${safesRow}</div>
     <div class="path">${cards}</div>
@@ -1050,6 +1159,10 @@ document.addEventListener('click', (ev) => {
     case 'hint': { const [cid, pid, lvl] = arg.split('|'); hintPressed(cid, pid, +lvl); break; }
     case 'viewSolution': { const [cid, pid] = arg.split('|'); solutionPressed(cid, pid); break; }
     case 'confirmSolution': { const [cid, pid] = arg.split('|'); confirmSolution(cid, pid); break; }
+    case 'dayOpen': dayOpen(); break;
+    case 'dayHint': dayHint(+arg); break;
+    case 'dayCheck': dayCheck(); break;
+    case 'dayDone': closeModal(); route(); break;
     case 'closeModal': closeModal(); break;
     case 'checkAnswer': { const [cid, pid] = arg.split('|'); checkAnswer(cid, pid); break; }
     case 'selfSolved': { const [cid, pid] = arg.split('|'); selfSolved(cid, pid, false); break; }
@@ -1157,6 +1270,7 @@ document.addEventListener('input', (ev) => {
 document.addEventListener('keydown', (ev) => {
   if (ev.key === 'Enter') {
     const el = ev.target;
+    if (el && el.id === 'day-ans') { dayCheck(); return; }
     if (el && el.id && el.id.startsWith('ans-')) {
       const pid = el.id.slice(4);
       const btn = document.querySelector(`[data-act="checkAnswer"][data-arg$="|${pid}"]`);
