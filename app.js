@@ -3,6 +3,21 @@
 
 const STORE_KEY = 'mathDetectiveV1';
 let store = loadStore();
+migrateStore(store);
+function migrateStore(s) {
+  let changed = false;
+  Object.values(s.profiles).forEach(p => {
+    if (!p.mysteryV2) {          // профиль со времён первого шифра
+      p.mysteryV2 = true;
+      if (p.mysterySolved) {     // старый раскрытый шифр зачли, новый закрыт
+        p.solvedV1 = true;
+        p.mysterySolved = false;
+      }
+      changed = true;
+    }
+  });
+  if (changed) { try { saveStore(); } catch (e) {} }
+}
 let safeModalQueue = [];
 let examTimer = null;
 
@@ -36,6 +51,7 @@ function newProfile(name, emoji) {
     earlyUnlock: {},// c2 -> true
     letters: [],    // индексы открытых букв тайного слова
     mysterySolved: false,
+    mysteryV2: true,
     achievements: [],
     activity: [],
     views: {},      // 'c1/p1' -> дата первого просмотра
@@ -174,7 +190,7 @@ function dayOpen() {
       <button class="small-btn ghost" data-act="dayHint" data-arg="1">💡 Наводка</button>
       <button class="small-btn ghost" data-act="dayHint" data-arg="2">💡 Ещё наводка</button>
     </div>
-    <p class="small" style="color:var(--ink-soft);margin-top:6px">Награда: ${daySession.hints ? '' : ''}15 🪙 без подсказок · 8 🪙 с наводками</p>
+    <p class="small" style="color:var(--ink-soft);margin-top:6px">Награда: 15 🪙 без подсказок · 8 🪙 с наводками</p>
   `);
   $('day-ans').focus();
 }
@@ -880,6 +896,12 @@ function renderMystery() {
     { i: 4, txt: 'Победить главаря выставки в деле №4 «Двойная бухгалтерия»' },
     { i: 5, txt: 'Победить главаря-хамелеона в деле №5 «Ночь в музее»' }
   ].map(s => `<li ${p.letters.indexOf(s.i) >= 0 ? 'style="color:#7fae5f"' : 'class="muted"'}>${p.letters.indexOf(s.i) >= 0 ? '✓' : '○'} ${s.txt}</li>`).join('');
+  const got = p.letters.length;
+  const recode = p.solvedV1
+    ? `<div class="paper" style="border-left:4px solid var(--gold)">
+      <h4>📜 Из архива агентства</h4>
+      <p>${DATA.mystery.recodeNote}</p>
+    </div>` : '';
   let finale = '';
   if (p.mysterySolved) {
     finale = `<div class="paper" style="text-align:center;border:2px solid var(--gold)">
@@ -887,12 +909,18 @@ function renderMystery() {
       <p style="font-size:1.3em"><b>${word}</b></p>
       <p>${DATA.mystery.prizeNote}</p>
     </div>`;
+  } else if (got < 3) {
+    finale = `<div class="paper">
+      <h4>Этот шифр не угадаешь</h4>
+      <p>Взломщики уже пробовали — пароль не выспросишь и не подобрать. Его можно только <b>добыть по буквам</b>: побеждай главарей и сдай экзамен. Когда букв станет три, здесь появится место для ввода.</p>
+      <p class="note">Добыто букв: ${got} из 6.</p>
+    </div>`;
   } else {
     finale = `<div class="paper">
       <h4>Знаешь слово целиком?</h4>
-      <p class="note">${DATA.mystery.hint}</p>
+      ${got >= 4 ? `<p class="note">${DATA.mystery.hint}</p>` : ''}
       <div class="answer-row">
-        <input type="text" id="mystery-word" placeholder="тайное слово" style="text-transform:uppercase">
+        <input type="text" id="mystery-word" placeholder="введи слово" style="text-transform:uppercase">
         <button class="gold" data-act="mysteryTry">Попробовать</button>
       </div>
       <div id="mystery-res"></div>
@@ -903,11 +931,13 @@ function renderMystery() {
     <p class="mystery-note">${DATA.mystery.prompt}</p>
     <div class="mystery-letters">${letters}</div>
     <div class="paper"><h4>Где добывают буквы</h4><ul>${sources}</ul></div>
+    ${recode}
     ${finale}
     ${footerHtml()}`;
 }
 function mysteryTry() {
   const p = P();
+  if (p.letters.length < 3) return;   // шифр второго уровня не принимают на слух
   const v = normHard($('mystery-word').value);
   if (v === normHard(DATA.mystery.word)) {
     p.mysterySolved = true;
