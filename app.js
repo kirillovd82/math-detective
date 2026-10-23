@@ -1271,10 +1271,13 @@ function closeModal() {
   if (safeModalQueue.length) showNextSafe();
 }
 function toast(text, cls) {
+  const wrap = $('toast-wrap');
+  for (const el of [...wrap.children]) if (el.textContent === text) return;
+  while (wrap.children.length >= 3) wrap.removeChild(wrap.firstChild);
   const t = document.createElement('div');
   t.className = 'toast ' + (cls || '');
   t.textContent = text;
-  $('toast-wrap').appendChild(t);
+  wrap.appendChild(t);
   setTimeout(() => t.remove(), 4200);
 }
 function confetti() {
@@ -1307,7 +1310,6 @@ document.addEventListener('click', (ev) => {
       if (p) { p.briefed = true; saveStore(); }
       location.hash = '';
       route();
-      toast('Добро пожаловать в агентство, ' + (p ? p.name : 'агент') + '!');
       break;
     }
     case 'pickProfile': store.currentId = arg; store.adminAuthed = false; saveStore(); location.hash = ''; route(); break;
