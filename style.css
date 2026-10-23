@@ -456,6 +456,16 @@ body[data-theme="night"] .profile-card, body[data-theme="day"] .profile-card { t
   to { transform: translateY(110vh) rotate(720deg); opacity: .9; }
 }
 
+/* ---------- задача дня и календарь огня ---------- */
+.day-card .day-row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+.flame-info { color: var(--ink); font-size: .95em; }
+.flame-strip { display: flex; gap: 4px; }
+.flame-cell { display: flex; flex-direction: column; align-items: center; width: 34px; padding: 3px 0; border-radius: 8px; background: var(--row-bg); }
+.flame-cell .f-ico { font-size: 1.05em; line-height: 1.2; }
+.flame-cell .f-day { font-size: .6em; color: var(--ink-soft); }
+.flame-cell.today { outline: 2px solid var(--gold); }
+.flame-cell.lit { background: var(--hint-bg); }
+
 footer.site-foot {
   margin-top: 40px; padding-top: 14px; border-top: 1px dashed var(--accent-soft);
   color: var(--muted); font-size: .8em; text-align: center;
