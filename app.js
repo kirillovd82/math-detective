@@ -1393,9 +1393,9 @@ document.addEventListener('click', (ev) => {
     case 'confirmReset': {
       const old = P();
       store.profiles[store.currentId] = {
-        name: old.name, emoji: old.emoji, created: today(),
+        name: old.name, emoji: old.emoji, created: today(), briefed: true,
         points: 0, problems: {}, notes: {}, bosses: {}, earlyUnlock: {},
-        letters: [], mysterySolved: false, achievements: [],
+        letters: [], mysterySolved: false, solvedV1: old.solvedV1, achievements: [],
         activity: [], views: {},
         exam: { best: null, started: null, answers: {}, submitted: false },
         safesOpened: []
