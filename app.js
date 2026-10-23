@@ -162,6 +162,57 @@ function buildLetter(cid) {
     '<div style="text-align:right;font-style:italic;margin-top:8px">Служу логике.<br>Твой Шеф 🎩</div>';
 }
 
+/* ---------- ИИ-наставник «Спросить Шефа» ---------- */
+let askState = { ctx: '', history: [], busy: false };
+function askOpen(ctx) {
+  askState = { ctx: ctx, history: [], busy: false };
+  showModal(`
+    <h2>🤖 Спросить Шефа</h2>
+    <p class="small" style="color:var(--ink-soft)">Шеф не даст ответ — он умеет только подталкивать к идее. Спрашивай, что непонятно.</p>
+    <div id="ask-log" style="text-align:left;max-height:40vh;overflow:auto;margin:10px 0"></div>
+    <div class="answer-row" style="justify-content:center">
+      <input type="text" id="ask-input" placeholder="Спроси Шефа…" autocomplete="off" style="flex:1;min-width:180px">
+      <button class="gold" data-act="askSend">Спросить</button>
+    </div>
+    <div style="margin-top:8px"><button class="small-btn ghost" data-act="closeModal">Закрыть</button></div>
+  `);
+  renderAskLog();
+  setTimeout(() => { const i = $('ask-input'); if (i) i.focus(); }, 50);
+}
+function renderAskLog() {
+  const box = $('ask-log');
+  if (!box) return;
+  box.innerHTML = askState.history.map(m => m.role === 'user'
+    ? `<div style="background:var(--note-bg);border-radius:10px;padding:8px 12px;margin:6px 0;color:var(--note-ink)"><b>Ты:</b> ${esc(m.text)}</div>`
+    : `<div style="background:var(--hint-bg);border-radius:10px;padding:8px 12px;margin:6px 0"><b>Шеф:</b> ${esc(m.text)}</div>`).join('')
+    + (askState.busy ? '<div class="small muted">Шеф думает…</div>' : '');
+  box.scrollTop = box.scrollHeight;
+}
+async function askSend() {
+  const inp = $('ask-input');
+  if (!inp || askState.busy) return;
+  const q = inp.value.trim();
+  if (!q) return;
+  inp.value = '';
+  askState.history.push({ role: 'user', text: q });
+  askState.busy = true;
+  renderAskLog();
+  const p = P();
+  try {
+    const r = await fetch('https://game-metrics.kirillovd.workers.dev/ask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q: q, ctx: askState.ctx, g: 'math', p: p ? p.name : '' })
+    });
+    const d = await r.json();
+    askState.history.push({ role: 'bot', text: d.answer || 'Хм. Перечитай условие — и расскажи мне, что уже заметил(а).' });
+  } catch (e) {
+    askState.history.push({ role: 'bot', text: 'Связь с Шефом пропала — попробуй ещё раз.' });
+  }
+  askState.busy = false;
+  renderAskLog();
+}
+
 /* ---------- прогресс по задачам ---------- */
 function entryKey(cid, pid) { return cid + '/' + pid; }
 function getEntry(cid, pid) { const p = P(); return p ? p.problems[entryKey(cid, pid)] || null : null; }
@@ -638,6 +689,7 @@ function renderCase(cid) {
         ${entryHints >= 1 || !closed ? `<button class="small-btn ghost" data-act="hint" data-arg="${c.id}|${pr.id}|1" ${closed ? 'disabled' : ''}>💡 Наводка 1</button>` : ''}
         ${entryHints >= 2 || !closed ? `<button class="small-btn ghost" data-act="hint" data-arg="${c.id}|${pr.id}|2" ${closed ? 'disabled' : ''}>💡 Наводка 2</button>` : ''}
         <button class="small-btn ghost" data-act="viewSolution" data-arg="${c.id}|${pr.id}">🔓 Показать решение</button>
+        ${closed ? '' : `<button class="small-btn ghost" data-act="askProblem" data-arg="${c.id}|${pr.id}">🤖 Спросить Шефа</button>`}
       </div>
       <div id="hints-${pr.id}">
         ${entryHints >= 1 && pr.hint1 ? `<div class="hint-item"><b>Наводка 1.</b> ${pr.hint1}</div>` : ''}
@@ -672,6 +724,7 @@ function renderCase(cid) {
         <button class="small-btn ghost" data-act="bossHint" data-arg="${c.id}|1">💡 Наводка 1</button>
         <button class="small-btn ghost" data-act="bossHint" data-arg="${c.id}|2">💡 Наводка 2</button>
         <button class="small-btn ghost" data-act="bossSolution" data-arg="${c.id}">🔓 Решение</button>
+        <button class="small-btn ghost" data-act="askBoss" data-arg="${c.id}">🤖 Спросить Шефа</button>
       </div>
       <div id="boss-hints"></div>
       <div class="answer-row" style="margin-top:12px">
@@ -1286,6 +1339,19 @@ document.addEventListener('click', (ev) => {
     case 'hint': { const [cid, pid, lvl] = arg.split('|'); hintPressed(cid, pid, +lvl); break; }
     case 'viewSolution': { const [cid, pid] = arg.split('|'); solutionPressed(cid, pid); break; }
     case 'confirmSolution': { const [cid, pid] = arg.split('|'); confirmSolution(cid, pid); break; }
+    case 'askProblem': {
+      const [cid, pid] = arg.split('|');
+      const c = DATA.caseList.find(x => x.id === cid);
+      const pr = c && c.problems.find(x => x.id === pid);
+      if (pr) askOpen(pr.statement);
+      break;
+    }
+    case 'askBoss': {
+      const c = DATA.caseList.find(x => x.id === arg);
+      if (c) askOpen(c.boss.statement);
+      break;
+    }
+    case 'askSend': askSend(); break;
     case 'dayOpen': dayOpen(); break;
     case 'dayHint': dayHint(+arg); break;
     case 'dayCheck': dayCheck(); break;
@@ -1398,6 +1464,7 @@ document.addEventListener('keydown', (ev) => {
   if (ev.key === 'Enter') {
     const el = ev.target;
     if (el && el.id === 'day-ans') { dayCheck(); return; }
+    if (el && el.id === 'ask-input') { askSend(); return; }
     if (el && el.id && el.id.startsWith('ans-')) {
       const pid = el.id.slice(4);
       const btn = document.querySelector(`[data-act="checkAnswer"][data-arg$="|${pid}"]`);
