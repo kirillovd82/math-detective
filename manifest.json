@@ -1,0 +1,12 @@
+{
+  "name": "Детективное агентство «Логика»",
+  "short_name": "Агентство",
+  "description": "Тренажёр по олимпиадной математике, 6 класс",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#17130e",
+  "theme_color": "#c43a2f",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
